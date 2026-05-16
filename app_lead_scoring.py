@@ -5,98 +5,144 @@ import streamlit as st
 from io import BytesIO
 
 # --- Cấu hình trang Streamlit ---
-st.set_page_config(page_title="Hệ thống AI Lead Scoring - Bất động sản", layout="wide")
+st.set_page_config(
+    page_title="AI Lead Scoring System - Real Estate",
+    page_icon="🏙️",
+    layout="wide"
+)
 
-# --- Định nghĩa các quy tắc chấm điểm (Dựa trên lead_scoring_skill.md) ---
+# --- CSS tùy chỉnh để làm đẹp giao diện ---
+st.markdown("""
+    <style>
+    .main {
+        background-color: #f5f7f9;
+    }
+    .stMetric {
+        background-color: white;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- Định nghĩa bộ quy tắc chấm điểm nâng cao (Dựa trên lead_scoring_skill.md) ---
 RULES = {
     "VIP": {
         "keywords": [
             r"tài chính mạnh", r"không thành vấn đề", r"thanh toán thẳng", r"ngân sách lớn",
             r"biệt thự đơn lập", r"penthouse", r"shophouse", r"quỹ đất công nghiệp", r"sàn văn phòng diện tích lớn",
-            r"quận 1", r"ven sông", r"vinhomes", r"phú mỹ hưng",
-            r"chủ doanh nghiệp", r"nhà đầu tư chuyên nghiệp", r"mua sỉ", r"mua số lượng lớn",
-            r"pháp lý chuẩn", r"sổ hồng riêng", r"gặp trực tiếp chủ đầu tư"
+            r"quận 1", r"ven sông", r"vinhomes", r"phú mỹ hưng", r"thanh toán 100%", r"mua sỉ", r"số lượng lớn",
+            r"chủ doanh nghiệp", r"nhà đầu tư chuyên nghiệp", r"pháp lý chuẩn", r"sổ hồng riêng", r"gặp chủ đầu tư"
         ],
         "score": 50
     },
     "TRASH": {
         "keywords": [
-            r"nhầm số", r"không có nhu cầu", r"dữ liệu cũ", r"nhầm ngành",
+            r"nhầm số", r"không có nhu cầu", r"dữ liệu cũ", r"nhầm ngành", r"sai số",
             r"hỏi giá cho vui", r"chưa có ý định mua", r"thái độ không hợp tác",
-            r"bảo hiểm", r"vay vốn", r"mời chào dịch vụ", r"quảng cáo",
-            r"thuê bao", r"không bắt máy", r"không phản hồi zalo"
+            r"bảo hiểm", r"vay vốn", r"mời chào dịch vụ", r"quảng cáo", r"spam",
+            r"thuê bao", r"không bắt máy", r"không phản hồi", r"chặn zalo"
         ],
         "score": -50
     }
 }
 
 def calculate_score(description):
-    """Hàm chấm điểm dựa trên mô tả nhu cầu"""
-    if not isinstance(description, str):
-        return 0, "Trung bình", "Không có mô tả nhu cầu"
+    """Hàm chấm điểm dựa trên mô tả nhu cầu (Rule-based AI)"""
+    if not isinstance(description, str) or description.strip() == "":
+        return 0, "Trung bình", "Không có thông tin mô tả"
     
     desc_lower = description.lower()
     score = 0
     reasons = []
 
-    # Kiểm tra quy tắc Rác trước (Ưu tiên theo lead_scoring_skill.md)
+    # 1. Kiểm tra dấu hiệu Rác (Ưu tiên loại bỏ)
     trash_found = [kw for kw in RULES["TRASH"]["keywords"] if re.search(kw, desc_lower)]
     
-    # Kiểm tra yêu cầu phi thực tế (Giá rẻ khu đắt tiền)
-    unrealistic_check = re.search(r"quận 1.*(1|2|vài trăm).*tỷ", desc_lower) or \
-                        re.search(r"trung tâm.*(2|hai).*triệu", desc_lower)
+    # Kiểm tra yêu cầu phi thực tế (Ví dụ: Nhà Q1 giá quá thấp)
+    unreal_q1 = re.search(r"(quận 1|q1).* (1|2|vài).* tỷ", desc_lower)
+    unreal_center = re.search(r"trung tâm.* (2|hai).* triệu", desc_lower)
     
-    if trash_found or unrealistic_check:
-        score = -50
-        reason_text = "Dấu hiệu rác: " + ", ".join(trash_found)
-        if unrealistic_check:
-            reason_text += " | Yêu cầu phi thực tế"
-        return score, "Rác", reason_text
+    if trash_found or unreal_q1 or unreal_center:
+        reason_list = trash_found
+        if unreal_q1 or unreal_center:
+            reason_list.append("Yêu cầu phi thực tế về giá/vị trí")
+        return -50, "Rác", "Dấu hiệu không tiềm năng: " + ", ".join(reason_list)
 
-    # Kiểm tra quy tắc VIP
+    # 2. Kiểm tra dấu hiệu VIP
     vip_found = [kw for kw in RULES["VIP"]["keywords"] if re.search(kw, desc_lower)]
     
-    # Kiểm tra ngân sách >= 20 tỷ
+    # Kiểm tra ngân sách >= 20 tỷ bằng số
     budget_match = re.search(r"(\d+)\s*tỷ", desc_lower)
     if budget_match:
-        budget = int(budget_match.group(1))
-        if budget >= 20:
-            vip_found.append(f"Ngân sách {budget} tỷ")
+        val = int(budget_match.group(1))
+        if val >= 20:
+            vip_found.append(f"Ngân sách lớn ({val} tỷ)")
 
     if vip_found:
-        score = 50
-        return score, "VIP", "Dấu hiệu VIP: " + ", ".join(vip_found)
+        return 50, "VIP", "Tiềm năng cao: " + ", ".join(vip_found)
 
-    # Các trường hợp khác
-    return 0, "Trung bình", "Nhu cầu thực tế, cần tư vấn thêm"
+    # 3. Các trường hợp còn lại
+    return 0, "Trung bình", "Nhu cầu thực tế, cần theo dõi thêm"
 
-def load_data(url):
-    """Tải dữ liệu từ Google Sheets công khai"""
+def load_data(source_type, source_val):
+    """Tải dữ liệu từ Google Sheets hoặc File Upload"""
     try:
-        # Chuyển đổi link edit sang link export CSV
-        csv_url = url.replace('/edit?gid=', '/export?format=csv&gid=')
-        if '/export' not in csv_url:
-            csv_url = url.split('/edit')[0] + '/export?format=csv'
+        if source_type == "Google Sheets":
+            csv_url = source_val.replace('/edit?gid=', '/export?format=csv&gid=')
+            if '/export' not in csv_url:
+                csv_url = source_val.split('/edit')[0] + '/export?format=csv'
+            headers = {"User-Agent": "Mozilla/5.0"}
+            response = requests.get(csv_url, headers=headers)
+            response.encoding = 'utf-8'
+            df = pd.read_csv(BytesIO(response.content))
+        else:
+            if source_val.name.endswith('.csv'):
+                df = pd.read_csv(source_val)
+            else:
+                df = pd.read_excel(source_val)
+        
+        # Chuẩn hóa tên cột (Tìm cột chứa mô tả nhu cầu)
+        target_col = None
+        for col in df.columns:
+            if 'nhu_cau' in col.lower() or 'mo_ta' in col.lower() or 'description' in col.lower():
+                target_col = col
+                break
+        
+        if target_col:
+            df = df.rename(columns={target_col: 'nhu_cau_mo_ta'})
+        else:
+            st.error("⚠️ Không tìm thấy cột mô tả nhu cầu. Vui lòng kiểm tra lại file.")
+            return None
             
-        response = requests.get(csv_url)
-        response.encoding = 'utf-8'
-        df = pd.read_csv(BytesIO(response.content))
         return df
     except Exception as e:
-        st.error(f"Lỗi khi tải dữ liệu: {e}")
+        st.error(f"❌ Lỗi tải dữ liệu: {e}")
         return None
 
-# --- Giao diện chính ---
-st.title("🏙️ AI Lead Scoring Automation System")
+# --- UI Header ---
+st.title("🏙️ AI Lead Scoring & Automation")
+st.subheader("Hệ thống chấm điểm khách hàng tiềm năng - Real Estate Edition")
 st.markdown("---")
 
-# Sidebar cấu hình
-st.sidebar.header("Cấu hình nguồn dữ liệu")
-sheet_url = st.sidebar.text_input("Google Sheet URL", "https://docs.google.com/spreadsheets/d/1vjkil0YX-o33KebjTQSB2dHDeydDg2ZpHxheJkQ8Vkk/edit?gid=0#gid=0")
+# --- Sidebar ---
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1680/1680951.png", width=100)
+st.sidebar.header("📥 Nguồn Dữ Liệu")
+input_method = st.sidebar.radio("Chọn phương thức nhập:", ["Google Sheets", "Tải file lên (CSV/Excel)"])
 
-if st.sidebar.button("Tải & Chấm điểm dữ liệu"):
-    with st.spinner("Đang xử lý dữ liệu bằng AI..."):
-        df = load_data(sheet_url)
+source_input = None
+if input_method == "Google Sheets":
+    source_input = st.sidebar.text_input("Dán link Google Sheet:", "https://docs.google.com/spreadsheets/d/1vjkil0YX-o33KebjTQSB2dHDeydDg2ZpHxheJkQ8Vkk/edit?gid=0#gid=0")
+else:
+    source_input = st.sidebar.file_uploader("Chọn file dữ liệu:", type=['csv', 'xlsx'])
+
+process_btn = st.sidebar.button("🚀 Bắt đầu chấm điểm")
+
+# --- Main Logic ---
+if process_btn and source_input:
+    with st.spinner("Đang phân tích dữ liệu bằng thuật toán Lead Scoring..."):
+        df = load_data(input_method, source_input)
         
         if df is not None:
             # Thực hiện chấm điểm
@@ -104,55 +150,60 @@ if st.sidebar.button("Tải & Chấm điểm dữ liệu"):
             df['Diem'], df['Phan_loai'], df['Ly_do'] = zip(*results)
             
             st.session_state['data'] = df
-            st.success(f"Đã xử lý xong {len(df)} khách hàng!")
+            st.success(f"✅ Đã xử lý thành công {len(df)} bản ghi!")
 
-# Hiển thị kết quả
+# --- Hiển thị kết quả ---
 if 'data' in st.session_state:
     df = st.session_state['data']
     
-    # Bộ lọc nhanh
-    col1, col2 = st.columns(2)
-    with col1:
-        filter_class = st.multiselect("Lọc theo phân loại", options=["VIP", "Tiềm năng", "Trung bình", "Rác"], default=["VIP", "Tiềm năng", "Trung bình", "Rác"])
+    # Dashboard Thống kê
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Tổng Lead", len(df))
+    m2.metric("Khách VIP 💎", len(df[df['Phan_loai'] == 'VIP']))
+    m3.metric("Trung bình 🟡", len(df[df['Phan_loai'] == 'Trung bình']))
+    m4.metric("Loại bỏ (Rác) 🔴", len(df[df['Phan_loai'] == 'Rác']))
     
-    filtered_df = df[df['Phan_loai'].isin(filter_class)]
+    # Bộ lọc & Bảng dữ liệu
+    st.markdown("### 🔍 Chi Tiết Danh Sách")
+    f_col = st.multiselect("Lọc trạng thái:", ["VIP", "Trung bình", "Rác"], default=["VIP", "Trung bình", "Rác"])
     
-    # Hiển thị bảng kết quả
-    st.subheader("Bảng danh sách khách hàng đã chấm điểm")
+    view_df = df[df['Phan_loai'].isin(f_col)]
     
-    # Tạo màu sắc cho phân loại
-    def color_classify(val):
+    # Styling Table
+    def color_rows(val):
         color = 'white'
-        if val == 'VIP': color = '#d4edda' # Xanh lá nhẹ
-        elif val == 'Rác': color = '#f8d7da' # Đỏ nhẹ
-        elif val == 'Trung bình': color = '#fff3cd' # Vàng nhẹ
+        if val == 'VIP': color = '#d4edda'
+        elif val == 'Rác': color = '#f8d7da'
+        elif val == 'Trung bình': color = '#fff3cd'
         return f'background-color: {color}'
 
-    st.dataframe(filtered_df.style.applymap(color_classify, subset=['Phan_loai']), use_container_width=True)
+    try:
+        styled_df = view_df.style.map(color_rows, subset=['Phan_loai'])
+    except:
+        styled_df = view_df.style.applymap(color_rows, subset=['Phan_loai'])
+        
+    st.dataframe(styled_df, use_container_width=True)
 
-    # Xuất dữ liệu Excel
+    # Export
     st.markdown("---")
-    st.subheader("📥 Xuất báo cáo")
-    
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Lead_Scoring_Results')
-    
-    st.download_button(
-        label="Tải file Excel kết quả (.xlsx)",
-        data=output.getvalue(),
-        file_name="lead_scoring_results.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    col_dl1, col_dl2 = st.columns([1, 4])
+    with col_dl1:
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='LeadScoring')
+        
+        st.download_button(
+            label="💾 Tải File Bàn Giao (.xlsx)",
+            data=output.getvalue(),
+            file_name="Bao_Cao_Cham_Diem_Lead.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    with col_dl2:
+        st.info("💡 File Excel tải về đã bao gồm đầy đủ cột Điểm, Phân loại và Lý do chi tiết để bạn gửi cho khách hàng/sếp.")
 
 else:
-    st.info("Vui lòng nhấn nút 'Tải & Chấm điểm dữ liệu' ở thanh bên trái để bắt đầu.")
+    st.info("👋 Chào mừng! Vui lòng chọn nguồn dữ liệu ở thanh bên trái và nhấn nút 'Bắt đầu chấm điểm'.")
 
-# Hướng dẫn
-with st.expander("ℹ️ Hướng dẫn về thuật toán chấm điểm"):
-    st.markdown("""
-    Hệ thống sử dụng các quy tắc từ `lead_scoring_skill.md`:
-    - **VIP (+50):** Nhận diện từ khóa tài chính mạnh, sản phẩm Penthouse/Biệt thự, hoặc ngân sách thực tế >= 20 tỷ.
-    - **Rác (-50):** Nhận diện các từ khóa 'nhầm số', 'spam', 'quảng cáo' hoặc các yêu cầu giá thấp vô lý (VD: Nhà trung tâm giá 2 triệu).
-    - **Trung bình (0):** Các nhu cầu thực tế ở phân khúc 3-10 tỷ nhưng chưa có dấu hiệu VIP.
-    """)
+# Footer
+st.markdown("---")
+st.caption("AI Lead Scoring System v1.2 | Phát triển dựa trên Quy tắc nghiệp vụ Bất động sản")

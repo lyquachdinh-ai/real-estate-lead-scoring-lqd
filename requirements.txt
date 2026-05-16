@@ -2,3 +2,4 @@ streamlit
 pandas
 requests
 openpyxl
+# Không cần Gemini API vì dùng Rule-based AI
